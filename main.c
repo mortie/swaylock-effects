@@ -715,33 +715,32 @@ static bool file_exists(const char *path) {
 }
 
 static void load_gif(char *arg, struct swaylock_state *state){
-	state->gif.pixbuf_animation = gdk_pixbuf_animation_new_from_file (arg, NULL);
-		if (state->gif.pixbuf_animation != NULL){
-			state->args.gif = true;
-			swaylock_log(LOG_DEBUG, "Loading gif at %s", arg);
+	GError *error;
+	state->gif.pixbuf_animation = gdk_pixbuf_animation_new_from_file (arg, &error);
+	if (state->gif.pixbuf_animation != NULL){
+		state->args.gif = true;
+		swaylock_log(LOG_DEBUG, "Loading gif at %s", arg);
 
 		// fake start time to manipulate gif playback, every keystroke
 		// the time gets increased by duration of one gif frame
+		struct _GTimeVal *fakeTime = calloc(1, sizeof(struct _GTimeVal));
+		fakeTime->tv_sec = 0;
+		fakeTime->tv_usec = 0;
+		
+		state->gif.time = fakeTime;
+		
+		state->gif.iter = gdk_pixbuf_animation_get_iter (state->gif.pixbuf_animation, state->gif.time);
+		
+		state->gif.delay = gdk_pixbuf_animation_iter_get_delay_time(state->gif.iter) * 1000;
+		
+		state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
+		
+		state->gif.height = gdk_pixbuf_get_height(state->gif.pixbuf);
+		state->gif.width = gdk_pixbuf_get_width(state->gif.pixbuf);
 
-			struct _GTimeVal *fakeTime = calloc(1, sizeof(struct _GTimeVal));
-			fakeTime->tv_sec = 0;
-			fakeTime->tv_usec = 0;
-			
-			state->gif.time = fakeTime;
-			
-			state->gif.iter = gdk_pixbuf_animation_get_iter (state->gif.pixbuf_animation, state->gif.time);
-			
-			
-			state->gif.delay = gdk_pixbuf_animation_iter_get_delay_time(state->gif.iter) * 1000;
-			
-			state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
-			
-			state->gif.height = gdk_pixbuf_get_height(state->gif.pixbuf);
-			state->gif.width = gdk_pixbuf_get_width(state->gif.pixbuf);
-
-		} else {
-			fprintf(stderr, "ERROR: Animation could not be opened / no loader for the file format exists / not enough memory to allocate image buffer / image contains invalid data\n");
-		}
+	} else {
+		fprintf(stderr, error->message);
+	}
 }
 
 static void load_image(char *arg, struct swaylock_state *state) {
