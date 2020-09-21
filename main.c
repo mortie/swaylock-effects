@@ -715,34 +715,33 @@ static bool file_exists(const char *path) {
 }
 
 static void load_gif(char *arg, struct swaylock_state *state){
+	state->gif.pixbuf_animation = gdk_pixbuf_animation_new_from_file (arg, NULL);
+		if (state->gif.pixbuf_animation != NULL){
+			state->args.gif = true;
+			swaylock_log(LOG_DEBUG, "Loading gif at %s", arg);
 
-    state->gif.pixbuf_animation = gdk_pixbuf_animation_new_from_file (arg, NULL);
-    if (state->gif.pixbuf_animation != NULL){
-        state->args.gif = true;
-        swaylock_log(LOG_DEBUG, "Loading gif at %s", arg);
+		// fake start time to manipulate gif playback, every keystroke
+		// the time gets increased by duration of one gif frame
 
-        // fake start time to manipulate gif playback, every keystroke
-        // the time gets increased by duration of one gif frame
-       
-        struct _GTimeVal *fakeTime = calloc(1, sizeof(struct _GTimeVal));
-        fakeTime->tv_sec = 0;
-        fakeTime->tv_usec = 0;
+			struct _GTimeVal *fakeTime = calloc(1, sizeof(struct _GTimeVal));
+			fakeTime->tv_sec = 0;
+			fakeTime->tv_usec = 0;
+			
+			state->gif.time = fakeTime;
+			
+			state->gif.iter = gdk_pixbuf_animation_get_iter (state->gif.pixbuf_animation, state->gif.time);
+			
+			
+			state->gif.delay = gdk_pixbuf_animation_iter_get_delay_time(state->gif.iter) * 1000;
+			
+			state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
+			
+			state->gif.height = gdk_pixbuf_get_height(state->gif.pixbuf);
+			state->gif.width = gdk_pixbuf_get_width(state->gif.pixbuf);
 
-        state->gif.time = fakeTime;
-
-        state->gif.iter = gdk_pixbuf_animation_get_iter (state->gif.pixbuf_animation, state->gif.time);
-        
-
-        state->gif.delay = gdk_pixbuf_animation_iter_get_delay_time(state->gif.iter) * 1000;
-        
-        state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
-
-        state->gif.height = gdk_pixbuf_get_height(state->gif.pixbuf);
-        state->gif.width = gdk_pixbuf_get_width(state->gif.pixbuf);
-        
-    } else {
-        fprintf(stderr, "ERROR: Animation could not be opened / no loader for the file format exists / not enough memory to allocate image buffer / image contains invalid data\n");
-    }
+		} else {
+			fprintf(stderr, "ERROR: Animation could not be opened / no loader for the file format exists / not enough memory to allocate image buffer / image contains invalid data\n");
+		}
 }
 
 static void load_image(char *arg, struct swaylock_state *state) {
@@ -897,7 +896,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_EFFECT_COMPOSE,
 		LO_EFFECT_CUSTOM,
 		LO_INDICATOR,
-        LO_GIF,
+		LO_GIF,
 		LO_CLOCK,
 		LO_TIMESTR,
 		LO_DATESTR,
@@ -971,7 +970,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"effect-compose", required_argument, NULL, LO_EFFECT_COMPOSE},
 		{"effect-custom", required_argument, NULL, LO_EFFECT_CUSTOM},
 		{"indicator", no_argument, NULL, LO_INDICATOR},
-        {"gif", required_argument, NULL, LO_GIF},
+		{"gif", required_argument, NULL, LO_GIF},
 		{"clock", no_argument, NULL, LO_CLOCK},
 		{"timestr", required_argument, NULL, LO_TIMESTR},
 		{"datestr", required_argument, NULL, LO_DATESTR},
@@ -1036,8 +1035,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"The format string for the time. Defaults to '%T'.\n"
 		"  --datestr <format>               "
 			"The format string for the date. Defaults to '%a, %x'.\n"
-        "  --gif <path>                     "
-            "Sets the gif to show, which advances by 1 frame every keystroke.\n"
+		"  --gif <path>                     "
+			"Sets the gif to show, which advances by 1 frame every keystroke.\n"
 		"  -v, --version                    "
 			"Show the version number and quit.\n"
 		"  --bs-hl-color <color>            "
@@ -1491,13 +1490,13 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				state->args.indicator = true;
 			}
 			break;
-        case LO_GIF:
-            if (state)  {
-                load_gif(optarg, state);
-                //centers the gif on screen (if no indicator offset was set)
-                state->args.radius = state->gif.width/2; //pretty hacky, is obsolete if the gif is placed onto its own surface,
-            }
-            break;
+		case LO_GIF:
+		if (state)  {
+			load_gif(optarg, state);
+			//centers the gif on screen (if no indicator offset was set)
+			state->args.radius = state->gif.width/2; //pretty hacky, is obsolete if the gif is placed onto its own surface,
+		}
+		break;
 		case LO_CLOCK:
 			if (state) {
 				state->args.clock = true;
@@ -1685,7 +1684,7 @@ int main(int argc, char **argv) {
 		.effects = NULL,
 		.effects_count = 0,
 		.indicator = false,
-        .gif = false,
+		.gif = false,
 		.clock = false,
 		.timestr = strdup("%T"),
 		.datestr = strdup("%a, %x"),

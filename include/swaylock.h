@@ -72,7 +72,7 @@ struct swaylock_args {
 	int effects_count;
 	bool indicator;
 	bool gif;
-    bool clock;
+	bool clock;
 	char *timestr;
 	char *datestr;
 	uint32_t fade_in;
@@ -88,12 +88,11 @@ struct swaylock_password {
 };
 
 struct swaylock_gif {
-    GdkPixbufAnimation *pixbuf_animation;
-    GTimeVal *time;
-    GdkPixbufAnimationIter *iter;
-    int delay, height, width;
-    GdkPixbuf *pixbuf;
-	struct wl_list link;
+	 GdkPixbufAnimation *pixbuf_animation;
+	 GTimeVal *time;
+	 GdkPixbufAnimationIter *iter;
+	 int delay, height, width;
+	 GdkPixbuf *pixbuf;
 };
 
 struct swaylock_state {
@@ -109,7 +108,7 @@ struct swaylock_state {
 	struct wl_shm *shm;
 	struct wl_list surfaces;
 	struct wl_list images;
-    struct swaylock_gif gif; 
+	struct swaylock_gif gif; 
 	struct swaylock_args args;
 	struct swaylock_password password;
 	struct swaylock_xkb xkb;

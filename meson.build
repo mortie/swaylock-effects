@@ -6,13 +6,13 @@ project(
 	meson_version: '>=0.48.0',
 	default_options: [
 		'c_std=c11',
-        'warning_level=1',
+		'warning_level=1',
 	],
 )
 
 add_project_arguments(
 	[
-      #      '-Wno-deprecated-declarations',
+		#'-Wno-deprecated-declarations',
 		'-Wno-unused-parameter',
 		'-Wno-unused-result',
 		'-Wundef',
@@ -135,7 +135,7 @@ dependencies = [
 	dl,
 	xkbcommon,
 	wayland_client,
-    gtk
+	gtk
 ]
 
 sources = [

@@ -215,31 +215,34 @@ void render_frame(struct swaylock_surface *surface) {
 		state->args.show_indicator && (state->auth_state != AUTH_STATE_IDLE ||
 			state->args.indicator_idle_visible);
 
-    if (state->args.gif){ 
-        if (state->auth_state == AUTH_STATE_INPUT){ //advance by 1 frame
-            state->gif.time->tv_usec += state->gif.delay; 
-        }else if (state->auth_state == AUTH_STATE_BACKSPACE){ //reverse by 1 frame
-            state->gif.time->tv_usec -= state->gif.delay; 
-        }else if (state->auth_state == AUTH_STATE_INVALID || state->auth_state == AUTH_STATE_CLEAR || state->auth_state == AUTH_STATE_IDLE){ //reset
-            state->gif.time->tv_usec = 0;
-            state->gif.time->tv_sec = 0;
-        }
-        
+	if (state->args.gif){ 
+		switch(state->auth_state){
+			case AUTH_STATE_INPUT: //advance by 1 frame
+				state->gif.time->tv_usec += state->gif.delay; 
+				break;	
+			case AUTH_STATE_BACKSPACE: //reverse by 1 frame
+				state->gif.time->tv_usec -= state->gif.delay;
+				break;
+			case AUTH_STATE_INVALID:
+			case AUTH_STATE_CLEAR:
+			case AUTH_STATE_IDLE: //reset
+				state->gif.time->tv_usec = 0;
+				state->gif.time->tv_sec = 0;
+				break;
+			default:
+				break;
+		}
+		if (state->gif.time->tv_usec > 1000000){
+			state->gif.time->tv_usec %= 1000000;
+			state->gif.time->tv_sec++; 
+		}
 
-        if (state->gif.time->tv_usec > 1000000){
-            state->gif.time->tv_usec %= 1000000;
-            state->gif.time->tv_sec++; 
-        }
+		gdk_pixbuf_animation_iter_advance(state->gif.iter, state->gif.time);
+		state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
 
-
-        gdk_pixbuf_animation_iter_advance(state->gif.iter, state->gif.time);
-        state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
-
-
-        gdk_cairo_set_source_pixbuf(cairo, state->gif.pixbuf, 0, 0); //draws to top left corner of indicator surface
-        cairo_paint(cairo);
-    }
-
+		gdk_cairo_set_source_pixbuf(cairo, state->gif.pixbuf, 0, 0); //draws to top left corner of indicator surface
+		cairo_paint(cairo);
+	}
 
 	if (state->args.indicator ||
 			(upstream_show_indicator && state->auth_state != AUTH_STATE_GRACE)) {
