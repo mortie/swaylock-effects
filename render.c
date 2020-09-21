@@ -7,6 +7,9 @@
 #include "background-image.h"
 #include "swaylock.h"
 
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#include <gtk/gtk.h>
+
 #define M_PI 3.14159265358979323846
 const float TYPE_INDICATOR_RANGE = M_PI / 3.0f;
 const float TYPE_INDICATOR_BORDER_THICKNESS = M_PI / 128.0f;
@@ -172,6 +175,35 @@ void render_frame(struct swaylock_surface *surface) {
 		state->args.show_indicator && (state->auth_state != AUTH_STATE_IDLE ||
 			state->args.indicator_idle_visible);
 
+    if (state->args.gif){ 
+        if (state->auth_state == AUTH_STATE_INPUT){ //advance
+            state->gif.time->tv_usec += state->gif.delay; 
+        }else if (state->auth_state == AUTH_STATE_BACKSPACE){ //reverse
+            state->gif.time->tv_usec -= state->gif.delay; 
+        }else if (state->auth_state == AUTH_STATE_INVALID || state->auth_state == AUTH_STATE_CLEAR || state->auth_state == AUTH_STATE_IDLE){ //reset
+            state->gif.time->tv_usec = 0;
+            state->gif.time->tv_sec = 0;
+        }
+        
+
+        if (state->gif.time->tv_usec > 1000000){
+            state->gif.time->tv_usec %= 1000000;
+            state->gif.time->tv_sec++; 
+        }
+
+
+
+
+        gdk_pixbuf_animation_iter_advance(state->gif.iter, state->gif.time);
+        state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
+
+        //fprintf(stderr, "%d x %d (pixbuf)", imgw, imgh);
+
+        gdk_cairo_set_source_pixbuf(cairo, state->gif.pixbuf, 0, 0); //(surface->width/2) - (state->gif.width/2), 0); //(surface->height/2));
+        cairo_paint(cairo);
+    }
+
+
 	if (state->args.indicator || upstream_show_indicator) {
 		// Draw circle
 		cairo_set_line_width(cairo, arc_thickness);
@@ -200,13 +232,10 @@ void render_frame(struct swaylock_surface *surface) {
 		cairo_set_font_size(cairo, font_size);
 		switch (state->auth_state) {
 		case AUTH_STATE_VALIDATING:
-			text = "verifying";
-			break;
 		case AUTH_STATE_INVALID:
-			text = "wrong";
-			break;
+			text = "";
 		case AUTH_STATE_CLEAR:
-			text = "cleared";
+			text = "";
 			break;
 		case AUTH_STATE_INPUT:
 		case AUTH_STATE_INPUT_NOP:
@@ -292,13 +321,13 @@ void render_frame(struct swaylock_surface *surface) {
 
 			/* Bottom */
 
-			cairo_set_font_size(cairo, arc_radius / 6.0f);
+			//cairo_set_font_size(cairo, arc_radius / 6.0f); want both lines to adhere to --font.size option
 			cairo_text_extents(cairo, text_l2, &extents_l2);
 			cairo_font_extents(cairo, &fe_l2);
 			x_l2 = (buffer_width / 2) -
 				(extents_l2.width / 2 + extents_l2.x_bearing);
 			y_l2 = (buffer_diameter / 2) +
-				(fe_l2.height / 2 - fe_l2.descent) + arc_radius / 3.5f;
+				(fe_l2.height / 2 - fe_l2.descent) + font_size;
 
 			cairo_move_to(cairo, x_l2, y_l2);
 			cairo_show_text(cairo, text_l2);
@@ -410,7 +439,6 @@ void render_frame(struct swaylock_surface *surface) {
 			render_frame(surface);
 		}
 	}
-
 	wl_surface_set_buffer_scale(surface->child, surface->scale);
 	wl_surface_attach(surface->child, surface->current_buffer->buffer, 0, 0);
 	wl_surface_damage(surface->child, 0, 0, surface->current_buffer->width, surface->current_buffer->height);

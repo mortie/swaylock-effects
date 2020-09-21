@@ -6,19 +6,18 @@ project(
 	meson_version: '>=0.48.0',
 	default_options: [
 		'c_std=c11',
-		'warning_level=2',
-		'werror=true',
+        'warning_level=1',
 	],
 )
 
 add_project_arguments(
 	[
-		'-Wno-unused-parameter',
-		'-Wno-unused-result',
-		'-Wundef',
-		'-Wvla',
-		'-fopenmp',
-		'-O3',
+      '-Wno-unused-parameter',
+      '-Wno-unused-result',
+      '-Wno-deprecated-declarations',
+      '-Wundef',
+	  '-fopenmp',
+	  '-O3',
 	],
 	language: 'c',
 )
@@ -56,6 +55,7 @@ crypt          = cc.find_library('crypt', required: not libpam.found())
 math           = cc.find_library('m')
 rt             = cc.find_library('rt')
 dl             = cc.find_library('dl')
+gtk            = dependency('gtk+-2.0')
 
 git = find_program('git', required: false)
 scdoc = find_program('scdoc', required: get_option('man-pages'))
@@ -133,6 +133,7 @@ dependencies = [
 	dl,
 	xkbcommon,
 	wayland_client,
+    gtk
 ]
 
 sources = [
