@@ -35,6 +35,25 @@ Locks your Wayland session.
 
 	Note: this is the default behavior of i3lock.
 
+*--fade-in* <seconds>
+	Fade in the lock screen.
+
+*--submit-on-touch*
+	Submit password in response to a touch event.
+
+*--grace* <seconds>
+	Only require a password after some grace period.
+
+	Note: Together with *--indicator*, the indicator is always shown.
+	Together with *--indicator-idle-visible*, the indicator is only shown
+	after the grace period.
+
+*--grace-no-mouse*
+	With *--grace*, don't unlock in response to a mouse event.
+
+*--grace-no-touch*
+	With *--grace*, don't unlock in response to a touch event.
+
 *-h, --help*
 	Show help message and quit.
 
@@ -47,7 +66,7 @@ Locks your Wayland session.
 	Disable the unlock indicator.
 
 *--indicator*
-	Always show the indicator, even when not typing.
+	Always show the indicator.
 
 *--clock*
 	Show a clock in the indicator.
@@ -115,6 +134,12 @@ Locks your Wayland session.
 
 *--indicator-thickness* <thickness>
 	Sets the indicator thickness. The default value is 10.
+
+*--indicator-x-position* <x>
+	Sets the horizontal position of the indicator.
+
+*--indicator-y-position* <y>
+	Sets the vertical position of the indicator.
 
 *--inside-color* <rrggbb[aa]>
 	Sets the color of the inside of the indicator.
@@ -201,9 +226,12 @@ Locks your Wayland session.
 *--effect-blur* <radius>x<times>
 	Blur displayed images.
 
+*--effect-pixelate* <factor>
+	Pixelate displayed images.
+
 *--effect-scale* <scale>
-	Scale the image by a factor. This can be used to pixelate the image,
-	or to make other effects faster if you don't need the full resolution.
+	Scale the image by a factor. This can be used to
+	make other effects faster if you don't need the full resolution.
 
 *--effect-greyscale*
 	Make the displayed image greyscale.

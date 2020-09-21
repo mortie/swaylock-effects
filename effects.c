@@ -11,6 +11,14 @@
 #include "effects.h"
 #include "log.h"
 
+#include <time.h>
+
+// glib might or might not have already defined MIN,
+// depending on whether we have pixbuf or not...
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 extern char **environ;
 
 static int screen_size_to_pix(struct swaylock_effect_screen_pos size, int screensize) {
@@ -95,67 +103,94 @@ static uint32_t blend_pixels(float alpha, uint32_t srcpix, uint32_t destpix) {
 
 static void blur_h(uint32_t *dest, uint32_t *src, int width, int height,
 		int radius) {
-	double coeff = 1.0 / (radius * 2 + 1);
+	const int minradius = radius < width ? radius : width;
 
 #pragma omp parallel for
-	for (int i = 0; i < height; ++i) {
-		int iwidth = i * width;
-		double r_acc = 0.0;
-		double g_acc = 0.0;
-		double b_acc = 0.0;
-		for (int j = -radius; j < width; ++j) {
-			if (j - radius - 1 >= 0) {
-				int index = iwidth + j - radius - 1;
-				r_acc -= coeff * ((src[index] & 0xff0000) >> 16);
-				g_acc -= coeff * ((src[index] & 0x00ff00) >> 8);
-				b_acc -= coeff * ((src[index] & 0x0000ff));
+	for (int y = 0; y < height; ++y) {
+		uint32_t *srow = src + y * width;
+		uint32_t *drow = dest + y * width;
+
+		// 'range' is float, because floating point division is usually faster
+		// than integer division.
+		int r_acc = 0;
+		int g_acc = 0;
+		int b_acc = 0;
+		float range = minradius;
+
+		// Accumulate the range (0..radius)
+		for (int x = 0; x < minradius; ++x) {
+			r_acc += (srow[x] & 0xff0000) >> 16;
+			g_acc += (srow[x] & 0x00ff00) >> 8;
+			b_acc += (srow[x] & 0x0000ff);
+		}
+
+		// Deal with the main body
+		for (int x = 0; x < width; ++x) {
+			if (x >= minradius) {
+				r_acc -= (srow[x - radius] & 0xff0000) >> 16;
+				g_acc -= (srow[x - radius] & 0x00ff00) >> 8;
+				b_acc -= (srow[x - radius] & 0x0000ff);
+				range -= 1;
 			}
-			if (j + radius < width) {
-				int index = iwidth + j + radius;
-				r_acc += coeff * ((src[index] & 0xff0000) >> 16);
-				g_acc += coeff * ((src[index] & 0x00ff00) >> 8);
-				b_acc += coeff * ((src[index] & 0x0000ff));
+
+			if (x < width - minradius) {
+				r_acc += (srow[x + radius] & 0xff0000) >> 16;
+				g_acc += (srow[x + radius] & 0x00ff00) >> 8;
+				b_acc += (srow[x + radius] & 0x0000ff);
+				range += 1;
 			}
-			if (j < 0)
-				continue;
-			int index = iwidth + j;
-			dest[index] = 0 |
-				(((uint32_t)(r_acc + 0.5) & 0xff) << 16) |
-				(((uint32_t)(g_acc + 0.5) & 0xff) << 8) |
-				(((uint32_t)(b_acc + 0.5) & 0xff));
+
+			drow[x] = 0 |
+				(int)(r_acc / range) << 16 |
+				(int)(g_acc / range) << 8 |
+				(int)(b_acc / range);
 		}
 	}
 }
 
 static void blur_v(uint32_t *dest, uint32_t *src, int width, int height,
 		int radius) {
-	double coeff = 1.0 / (radius * 2 + 1);
+	const int minradius = radius < height ? radius : height;
 
 #pragma omp parallel for
-	for (int j = 0; j < width; ++j) {
-		double r_acc = 0.0;
-		double g_acc = 0.0;
-		double b_acc = 0.0;
-		for (int i = -radius; i < height; ++i) {
-			if (i - radius - 1 >= 0) {
-				int index = (i - radius - 1) * width + j;
-				r_acc -= coeff * ((src[index] & 0xff0000) >> 16);
-				g_acc -= coeff * ((src[index] & 0x00ff00) >> 8);
-				b_acc -= coeff * ((src[index] & 0x0000ff));
+	for (int x = 0; x < width; ++x) {
+		uint32_t *scol = src + x;
+		uint32_t *dcol = dest + x;
+
+		// 'range' is float, because floating point division is usually faster
+		// than integer division.
+		int r_acc = 0;
+		int g_acc = 0;
+		int b_acc = 0;
+		float range = minradius;
+
+		// Accumulate the range (0..radius)
+		for (int y = 0; y < minradius; ++y) {
+			r_acc += (scol[y * width] & 0xff0000) >> 16;
+			g_acc += (scol[y * width] & 0x00ff00) >> 8;
+			b_acc += (scol[y * width] & 0x0000ff);
+		}
+
+		// Deal with the main body
+		for (int y = 0; y < height; ++y) {
+			if (y >= minradius) {
+				r_acc -= (scol[(y - radius) * width] & 0xff0000) >> 16;
+				g_acc -= (scol[(y - radius) * width] & 0x00ff00) >> 8;
+				b_acc -= (scol[(y - radius) * width] & 0x0000ff);
+				range -= 1;
 			}
-			if (i + radius < height) {
-				int index = (i + radius) * width + j;
-				r_acc += coeff * ((src[index] & 0xff0000) >> 16);
-				g_acc += coeff * ((src[index] & 0x00ff00) >> 8);
-				b_acc += coeff * ((src[index] & 0x0000ff));
+
+			if (y < height - minradius) {
+				r_acc += (scol[(y + radius) * width] & 0xff0000) >> 16;
+				g_acc += (scol[(y + radius) * width] & 0x00ff00) >> 8;
+				b_acc += (scol[(y + radius) * width] & 0x0000ff);
+				range += 1;
 			}
-			if (i < 0)
-				continue;
-			int index = i * width + j;
-			dest[index] = 0 |
-				(((uint32_t)(r_acc + 0.5) & 0xff) << 16) |
-				(((uint32_t)(g_acc + 0.5) & 0xff) << 8) |
-				(((uint32_t)(b_acc + 0.5) & 0xff));
+
+			dcol[y * width] = 0 |
+				(int)(r_acc / range) << 16 |
+				(int)(g_acc / range) << 8 |
+				(int)(b_acc / range);
 		}
 	}
 }
@@ -187,6 +222,42 @@ static void effect_blur(uint32_t *dest, uint32_t *src, int width, int height,
 	// if the last buffer we used was src, copy that over to dest.
 	if (dest != origdest)
 		memcpy(origdest, dest, width * height * sizeof(*dest));
+}
+
+static void effect_pixelate(uint32_t *data, int width, int height, int factor) {
+#pragma omp parallel for
+	for (int y = 0; y < height / factor + 1; ++y) {
+		for (int x = 0; x < width / factor + 1; ++x) {
+			int total_r = 0, total_g = 0, total_b = 0;
+
+			int xstart = x * factor;
+			int ystart = y * factor;
+			int xlim = MIN(xstart + factor, width);
+			int ylim = MIN(ystart + factor, height);
+
+			// Average
+			for (int ry = ystart; ry < ylim; ++ry) {
+				for (int rx = xstart; rx < xlim; ++rx) {
+					int index = ry * width + rx;
+					total_r += (data[index] & 0xff0000) >> 16;
+					total_g += (data[index] & 0x00ff00) >> 8;
+					total_b += (data[index] & 0x0000ff);
+				}
+			}
+
+			int r = total_r / (factor * factor);
+			int g = total_g / (factor * factor);
+			int b = total_b / (factor * factor);
+
+			// Fill pixels
+			for (int ry = ystart; ry < ylim; ++ry) {
+				for (int rx = xstart; rx < xlim; ++rx) {
+					int index = ry * width + rx;
+					data[index] = r << 16 | g << 8 | b;
+				}
+			}
+		}
+	}
 }
 
 static void effect_scale(uint32_t *dest, uint32_t *src, int swidth, int sheight,
@@ -258,6 +329,9 @@ static void effect_compose(uint32_t *data, int width, int height,
 		struct swaylock_effect_screen_pos posh,
 		int gravity, char *imgpath) {
 #if !HAVE_GDK_PIXBUF
+	(void)&blend_pixels;
+	(void)&screen_size_to_pix;
+	(void)&screen_pos_pair_to_pix;
 	swaylock_log(LOG_ERROR, "Compose effect: Compiled without gdk_pixbuf support.\n");
 	return;
 #else
@@ -356,7 +430,6 @@ static void effect_custom(uint32_t *data, int width, int height,
 
 cairo_surface_t *swaylock_effects_run(cairo_surface_t *surface,
 		struct swaylock_effect *effects, int count) {
-
 	for (int i = 0; i < count; ++i) {
 		struct swaylock_effect *effect = &effects[i];
 		switch (effect->tag) {
@@ -381,6 +454,16 @@ cairo_surface_t *swaylock_effects_run(cairo_surface_t *surface,
 			cairo_surface_flush(surf);
 			cairo_surface_destroy(surface);
 			surface = surf;
+			break;
+		}
+
+		case EFFECT_PIXELATE: {
+			effect_pixelate(
+					(uint32_t *)cairo_image_surface_get_data(surface),
+					cairo_image_surface_get_width(surface),
+					cairo_image_surface_get_height(surface),
+					effect->e.pixelate.factor);
+			cairo_surface_flush(surface);
 			break;
 		}
 

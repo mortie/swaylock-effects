@@ -1,5 +1,5 @@
-#ifndef _SWAYLOCK_EFFECTS_H_
-#define _SWAYLOCK_EFFECTS_H_
+#ifndef _SWAYLOCK_EFFECTS_H
+#define _SWAYLOCK_EFFECTS_H
 
 #include <stdbool.h>
 
@@ -15,6 +15,9 @@ struct swaylock_effect {
 		struct {
 			int radius, times;
 		} blur;
+		struct {
+			int factor;
+		} pixelate;
 		double scale;
 		struct {
 			double base;
@@ -43,6 +46,7 @@ struct swaylock_effect {
 
 	enum {
 		EFFECT_BLUR,
+		EFFECT_PIXELATE,
 		EFFECT_SCALE,
 		EFFECT_GREYSCALE,
 		EFFECT_VIGNETTE,

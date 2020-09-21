@@ -8,6 +8,7 @@
 #include "pool-buffer.h"
 #include "seat.h"
 #include "effects.h"
+#include "fade.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 enum auth_state {
@@ -18,6 +19,7 @@ enum auth_state {
 	AUTH_STATE_BACKSPACE,
 	AUTH_STATE_VALIDATING,
 	AUTH_STATE_INVALID,
+	AUTH_STATE_GRACE,
 };
 
 struct swaylock_colorset {
@@ -73,6 +75,11 @@ struct swaylock_args {
     bool clock;
 	char *timestr;
 	char *datestr;
+	uint32_t fade_in;
+	bool password_submit_on_touch;
+	uint32_t password_grace_period;
+	bool password_grace_no_mouse;
+	bool password_grace_no_touch;
 };
 
 struct swaylock_password {
@@ -120,6 +127,7 @@ struct swaylock_surface {
 		cairo_surface_t *image;
 		struct {
 			uint32_t format, width, height, stride;
+			enum wl_output_transform transform;
 			void *data;
 			struct swaylock_image *image;
 		} screencopy;
@@ -136,11 +144,13 @@ struct swaylock_surface {
 	struct pool_buffer buffers[2];
 	struct pool_buffer indicator_buffers[2];
 	struct pool_buffer *current_buffer;
+	struct swaylock_fade fade;
 	bool frame_pending, dirty;
 	uint32_t width, height;
 	uint32_t indicator_width, indicator_height;
 	int32_t scale;
 	enum wl_output_subpixel subpixel;
+	enum wl_output_transform transform;
 	char *output_name;
 	struct wl_list link;
 };
@@ -155,7 +165,11 @@ struct swaylock_image {
 
 void swaylock_handle_key(struct swaylock_state *state,
 		xkb_keysym_t keysym, uint32_t codepoint);
+void swaylock_handle_mouse(struct swaylock_state *state);
+void swaylock_handle_touch(struct swaylock_state *state);
 void render_frame_background(struct swaylock_surface *surface);
+void render_background_fade(struct swaylock_surface *surface, uint32_t time);
+void render_background_fade_prepare(struct swaylock_surface *surface, struct pool_buffer *buffer);
 void render_frame(struct swaylock_surface *surface);
 void render_frames(struct swaylock_state *state);
 void damage_surface(struct swaylock_surface *surface);

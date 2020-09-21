@@ -102,6 +102,46 @@ void render_frame_background(struct swaylock_surface *surface) {
 	wl_surface_commit(surface->surface);
 }
 
+void render_background_fade(struct swaylock_surface *surface, uint32_t time) {
+	struct swaylock_state *state = surface->state;
+
+	int buffer_width = surface->width * surface->scale;
+	int buffer_height = surface->height * surface->scale;
+	if (buffer_width == 0 || buffer_height == 0) {
+		return; // not yet configured
+	}
+
+	if (fade_is_complete(&surface->fade)) {
+		return;
+	}
+
+	surface->current_buffer = get_next_buffer(state->shm,
+			surface->buffers, buffer_width, buffer_height);
+	if (surface->current_buffer == NULL) {
+		return;
+	}
+
+	fade_update(&surface->fade, surface->current_buffer, time);
+
+	wl_surface_set_buffer_scale(surface->surface, surface->scale);
+	wl_surface_attach(surface->surface, surface->current_buffer->buffer, 0, 0);
+	wl_surface_damage(surface->surface, 0, 0, surface->width, surface->height);
+	wl_surface_commit(surface->surface);
+}
+
+void render_background_fade_prepare(struct swaylock_surface *surface, struct pool_buffer *buffer) {
+	if (fade_is_complete(&surface->fade)) {
+		return;
+	}
+
+	fade_prepare(&surface->fade, buffer);
+
+	wl_surface_set_buffer_scale(surface->surface, surface->scale);
+	wl_surface_attach(surface->surface, surface->current_buffer->buffer, 0, 0);
+	wl_surface_damage(surface->surface, 0, 0, surface->width, surface->height);
+	wl_surface_commit(surface->surface);
+}
+
 void render_frame(struct swaylock_surface *surface) {
 	struct swaylock_state *state = surface->state;
 
@@ -176,9 +216,9 @@ void render_frame(struct swaylock_surface *surface) {
 			state->args.indicator_idle_visible);
 
     if (state->args.gif){ 
-        if (state->auth_state == AUTH_STATE_INPUT){ //advance
+        if (state->auth_state == AUTH_STATE_INPUT){ //advance by 1 frame
             state->gif.time->tv_usec += state->gif.delay; 
-        }else if (state->auth_state == AUTH_STATE_BACKSPACE){ //reverse
+        }else if (state->auth_state == AUTH_STATE_BACKSPACE){ //reverse by 1 frame
             state->gif.time->tv_usec -= state->gif.delay; 
         }else if (state->auth_state == AUTH_STATE_INVALID || state->auth_state == AUTH_STATE_CLEAR || state->auth_state == AUTH_STATE_IDLE){ //reset
             state->gif.time->tv_usec = 0;
@@ -192,19 +232,17 @@ void render_frame(struct swaylock_surface *surface) {
         }
 
 
-
-
         gdk_pixbuf_animation_iter_advance(state->gif.iter, state->gif.time);
         state->gif.pixbuf = gdk_pixbuf_animation_iter_get_pixbuf(state->gif.iter);
 
-        //fprintf(stderr, "%d x %d (pixbuf)", imgw, imgh);
 
-        gdk_cairo_set_source_pixbuf(cairo, state->gif.pixbuf, 0, 0); //(surface->width/2) - (state->gif.width/2), 0); //(surface->height/2));
+        gdk_cairo_set_source_pixbuf(cairo, state->gif.pixbuf, 0, 0); //draws to top left corner of indicator surface
         cairo_paint(cairo);
     }
 
 
-	if (state->args.indicator || upstream_show_indicator) {
+	if (state->args.indicator ||
+			(upstream_show_indicator && state->auth_state != AUTH_STATE_GRACE)) {
 		// Draw circle
 		cairo_set_line_width(cairo, arc_thickness);
 		cairo_arc(cairo, buffer_width / 2, buffer_diameter / 2, arc_radius,

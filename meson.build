@@ -1,7 +1,7 @@
 project(
 	'swaylock',
 	'c',
-	version: '1.6-0',
+	version: '1.6-1',
 	license: 'MIT',
 	meson_version: '>=0.48.0',
 	default_options: [
@@ -12,12 +12,14 @@ project(
 
 add_project_arguments(
 	[
-      '-Wno-unused-parameter',
-      '-Wno-unused-result',
-      '-Wno-deprecated-declarations',
-      '-Wundef',
-	  '-fopenmp',
-	  '-O3',
+      #      '-Wno-deprecated-declarations',
+		'-Wno-unused-parameter',
+		'-Wno-unused-result',
+		'-Wundef',
+		'-Wvla',
+		'-fopenmp',
+		'-O3',
+		'-mtune=native',
 	],
 	language: 'c',
 )
@@ -149,6 +151,7 @@ sources = [
 	'seat.c',
 	'unicode.c',
 	'effects.c',
+	'fade.c',
 ]
 
 if libpam.found()

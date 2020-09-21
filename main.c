@@ -28,6 +28,27 @@
 #include "wlr-screencopy-unstable-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 
+// returns a positive integer in milliseconds
+static uint32_t parse_seconds(const char *seconds) {
+	char *endptr;
+	errno = 0;
+	float val = strtof(seconds, &endptr);
+	if (errno != 0) {
+		swaylock_log(LOG_DEBUG, "Invalid number for seconds %s, defaulting to 0", seconds);
+		return 0;
+	}
+	if (endptr == seconds) {
+		swaylock_log(LOG_DEBUG, "No digits were found in %s, defaulting to 0", seconds);
+		return 0;
+	}
+	if (val < 0) {
+		swaylock_log(LOG_DEBUG, "Negative seconds not allowed for %s, defaulting to 0", seconds);
+		return 0;
+	}
+
+	return (uint32_t)floor(val * 1000);
+}
+
 static uint32_t parse_color(const char *color) {
 	if (color[0] == '#') {
 		++color;
@@ -215,6 +236,7 @@ static void destroy_surface(struct swaylock_surface *surface) {
 	}
 	destroy_buffer(&surface->buffers[0]);
 	destroy_buffer(&surface->buffers[1]);
+	fade_destroy(&surface->fade);
 	wl_output_destroy(surface->output);
 	free(surface);
 }
@@ -225,6 +247,9 @@ static cairo_surface_t *select_image(struct swaylock_state *state,
 		struct swaylock_surface *surface);
 
 static bool surface_is_opaque(struct swaylock_surface *surface) {
+	if (!fade_is_complete(&surface->fade)) {
+		return false;
+	}
 	if (surface->image) {
 		return cairo_surface_get_content(surface->image) == CAIRO_CONTENT_COLOR;
 	}
@@ -233,6 +258,10 @@ static bool surface_is_opaque(struct swaylock_surface *surface) {
 
 static void create_layer_surface(struct swaylock_surface *surface) {
 	struct swaylock_state *state = surface->state;
+
+	if (state->args.fade_in) {
+		surface->fade.target_time = state->args.fade_in;
+	}
 
 	surface->image = select_image(state, surface);
 
@@ -285,6 +314,7 @@ static void layer_surface_configure(void *data,
 	surface->indicator_height = 1;
 	zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 	render_frame_background(surface);
+	render_background_fade_prepare(surface, surface->current_buffer);
 	render_frame(surface);
 }
 
@@ -313,9 +343,14 @@ static void surface_frame_handle_done(void *data, struct wl_callback *callback,
 		struct wl_callback *callback = wl_surface_frame(surface->surface);
 		wl_callback_add_listener(callback, &surface_frame_listener, surface);
 		surface->frame_pending = true;
+		surface->dirty = false;
+
+		if (!fade_is_complete(&surface->fade)) {
+			render_background_fade(surface, time);
+			surface->dirty = true;
+		}
 
 		render_frame(surface);
-		surface->dirty = false;
 	}
 }
 
@@ -348,6 +383,7 @@ static void handle_wl_output_geometry(void *data, struct wl_output *wl_output,
 		int32_t transform) {
 	struct swaylock_surface *surface = data;
 	surface->subpixel = subpixel;
+	surface->transform = transform;
 	if (surface->state->run_display) {
 		damage_surface(surface);
 	}
@@ -464,7 +500,48 @@ static void handle_screencopy_frame_buffer(void *data,
 
 static void handle_screencopy_frame_flags(void *data,
 		struct zwlr_screencopy_frame_v1 *frame, uint32_t flags) {
-	// Who cares
+	struct swaylock_surface *surface = data;
+
+	// The transform affecting a screenshot consists of three parts:
+	// Whether it's flipped vertically, whether it's flipped horizontally,
+	// and the four rotation options (0, 90, 180, 270).
+	// Any of the combinations of vertical flips, horizontal flips and rotation,
+	// can be expressed in terms of only horizontal flips and rotation
+	// (which is what the enum wl_output_transform encodes).
+	// Therefore, instead of inverting the Y axis or keeping around the
+	// "was it vertically flipped?" bit, we just map our state space onto the
+	// state space encoded by wl_output_transform and let load_background_from_buffer
+	// handle the rest.
+	if (flags & ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT) {
+		switch (surface->transform) {
+		case WL_OUTPUT_TRANSFORM_NORMAL:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_FLIPPED_180;
+			break;
+		case WL_OUTPUT_TRANSFORM_90:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_FLIPPED_90;
+			break;
+		case WL_OUTPUT_TRANSFORM_180:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_FLIPPED;
+			break;
+		case WL_OUTPUT_TRANSFORM_270:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_FLIPPED_270;
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_180;
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_90;
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_NORMAL;
+			break;
+		case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+			surface->screencopy.transform = WL_OUTPUT_TRANSFORM_270;
+			break;
+		}
+	} else {
+		surface->screencopy.transform = surface->transform;
+	}
 }
 
 static void handle_screencopy_frame_ready(void *data,
@@ -478,7 +555,8 @@ static void handle_screencopy_frame_ready(void *data,
 			surface->screencopy.format,
 			surface->screencopy.width,
 			surface->screencopy.height,
-			surface->screencopy.stride);
+			surface->screencopy.stride,
+			surface->screencopy.transform);
 
 	if (!image->cairo_surface) {
 		free(image);
@@ -550,7 +628,7 @@ static void handle_global(void *data, struct wl_registry *registry,
 				&wl_shm_interface, 1);
 	} else if (strcmp(interface, wl_seat_interface.name) == 0) {
 		struct wl_seat *seat = wl_registry_bind(
-				registry, name, &wl_seat_interface, 3);
+				registry, name, &wl_seat_interface, 4);
 		struct swaylock_seat *swaylock_seat =
 			calloc(1, sizeof(struct swaylock_seat));
 		swaylock_seat->state = state;
@@ -812,6 +890,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_TEXT_VER_COLOR,
 		LO_TEXT_WRONG_COLOR,
 		LO_EFFECT_BLUR,
+		LO_EFFECT_PIXELATE,
 		LO_EFFECT_SCALE,
 		LO_EFFECT_GREYSCALE,
 		LO_EFFECT_VIGNETTE,
@@ -822,6 +901,11 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		LO_CLOCK,
 		LO_TIMESTR,
 		LO_DATESTR,
+		LO_FADE_IN,
+		LO_SUBMIT_ON_TOUCH,
+		LO_GRACE,
+		LO_GRACE_NO_MOUSE,
+		LO_GRACE_NO_TOUCH,
 	};
 
 	static struct option long_options[] = {
@@ -880,6 +964,7 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"text-ver-color", required_argument, NULL, LO_TEXT_VER_COLOR},
 		{"text-wrong-color", required_argument, NULL, LO_TEXT_WRONG_COLOR},
 		{"effect-blur", required_argument, NULL, LO_EFFECT_BLUR},
+		{"effect-pixelate", required_argument, NULL, LO_EFFECT_PIXELATE},
 		{"effect-scale", required_argument, NULL, LO_EFFECT_SCALE},
 		{"effect-greyscale", no_argument, NULL, LO_EFFECT_GREYSCALE},
 		{"effect-vignette", required_argument, NULL, LO_EFFECT_VIGNETTE},
@@ -890,6 +975,11 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 		{"clock", no_argument, NULL, LO_CLOCK},
 		{"timestr", required_argument, NULL, LO_TIMESTR},
 		{"datestr", required_argument, NULL, LO_DATESTR},
+		{"fade-in", required_argument, NULL, LO_FADE_IN},
+		{"submit-on-touch", no_argument, NULL, LO_SUBMIT_ON_TOUCH},
+		{"grace", required_argument, NULL, LO_GRACE},
+		{"grace-no-mouse", no_argument, NULL, LO_GRACE_NO_MOUSE},
+		{"grace-no-touch", no_argument, NULL, LO_GRACE_NO_TOUCH},
 		{0, 0, 0, 0}
 	};
 
@@ -908,6 +998,16 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Show current count of failed authentication attempts.\n"
 		"  -f, --daemonize                  "
 			"Detach from the controlling terminal after locking.\n"
+		"  --fade-in <seconds>              "
+			"Make the lock screen fade in instead of just popping in.\n"
+		"  --submit-on-touch                "
+			"Submit password in response to a touch event.\n"
+		"  --grace <seconds>                "
+			"Password grace period. Don't require the password for the first N seconds.\n"
+		"  --grace-no-mouse                 "
+			"During the grace period, don't unlock on a mouse event.\n"
+		"  --grace-no-touch                 "
+			"During the grace period, don't unlock on a touch event.\n"
 		"  -h, --help                       "
 			"Show help message and quit.\n"
 		"  -i, --image [[<output>]:]<path>  "
@@ -1024,6 +1124,8 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			"Sets the color of the text when invalid.\n"
 		"  --effect-blur <radius>x<times>   "
 			"Blur images.\n"
+		"  --effect-pixelate <factor>       "
+			"Pixelate images.\n"
 		"  --effect-scale <scale>           "
 			"Scale images.\n"
 		"  --effect-greyscale               "
@@ -1325,6 +1427,15 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 				}
 			}
 			break;
+		case LO_EFFECT_PIXELATE:
+			if (state) {
+				state->args.effects = realloc(state->args.effects,
+						sizeof(*state->args.effects) * ++state->args.effects_count);
+				struct swaylock_effect *effect = &state->args.effects[state->args.effects_count - 1];
+				effect->tag = EFFECT_PIXELATE;
+				effect->e.pixelate.factor = atoi(optarg);
+			}
+			break;
 		case LO_EFFECT_SCALE:
 			if (state) {
 				state->args.effects = realloc(state->args.effects,
@@ -1402,6 +1513,31 @@ static int parse_options(int argc, char **argv, struct swaylock_state *state,
 			if (state) {
 				free(state->args.datestr);
 				state->args.datestr = strdup(optarg);
+			}
+			break;
+		case LO_FADE_IN:
+			if (state) {
+				state->args.fade_in = parse_seconds(optarg);
+			}
+			break;
+		case LO_SUBMIT_ON_TOUCH:
+			if (state) {
+				state->args.password_submit_on_touch = true;
+			}
+			break;
+		case LO_GRACE:
+			if (state) {
+				state->args.password_grace_period = parse_seconds(optarg);
+			}
+			break;
+		case LO_GRACE_NO_MOUSE:
+			if (state) {
+				state->args.password_grace_no_mouse = true;
+			}
+			break;
+		case LO_GRACE_NO_TOUCH:
+			if (state) {
+				state->args.password_grace_no_touch = true;
 			}
 			break;
 		default:
@@ -1493,6 +1629,13 @@ static void display_in(int fd, short mask, void *data) {
 	}
 }
 
+static void end_grace_period(void *data) {
+	struct swaylock_state *state = data;
+	if (state->auth_state == AUTH_STATE_GRACE) {
+		state->auth_state = AUTH_STATE_IDLE;
+	}
+}
+
 static void comm_in(int fd, short mask, void *data) {
 	if (read_comm_reply()) {
 		// Authentication succeeded
@@ -1546,6 +1689,7 @@ int main(int argc, char **argv) {
 		.clock = false,
 		.timestr = strdup("%T"),
 		.datestr = strdup("%a, %x"),
+		.password_grace_period = 0,
 	};
 	wl_list_init(&state.images);
 	set_default_colors(&state.args.colors);
@@ -1583,6 +1727,10 @@ int main(int argc, char **argv) {
 		state.args.colors.line = state.args.colors.inside;
 	} else if (line_mode == LM_RING) {
 		state.args.colors.line = state.args.colors.ring;
+	}
+
+	if (state.args.password_grace_period > 0) {
+		state.auth_state = AUTH_STATE_GRACE;
 	}
 
 #ifdef __linux__
@@ -1687,6 +1835,13 @@ int main(int argc, char **argv) {
 	loop_add_fd(state.eventloop, get_comm_reply_fd(), POLLIN, comm_in, NULL);
 
 	loop_add_timer(state.eventloop, 1000, timer_render, &state);
+
+	if (state.args.password_grace_period > 0) {
+		loop_add_timer(state.eventloop, state.args.password_grace_period, end_grace_period, &state);
+	}
+
+	// Re-draw once to start the draw loop
+	damage_state(&state);
 
 	state.run_display = true;
 	while (state.run_display) {
